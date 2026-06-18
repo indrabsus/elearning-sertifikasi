@@ -106,8 +106,10 @@ export default function GuruDetailPengumpulanTugasPage() {
   const [search, setSearch] = useState("")
   const [selectedPengumpulan, setSelectedPengumpulan] =
     useState<Pengumpulan | null>(null)
-  const [nilai, setNilai] = useState(0)
+
   const [catatan, setCatatan] = useState("")
+  const [nilaiAkhir, setNilaiAkhir] = useState(0)
+  const [nilaiPerEssay, setNilaiPerEssay] = useState<Record<string, number>>({})
   const [saving, setSaving] = useState(false)
 
   const getData = async (userProfile: Profile) => {
@@ -296,32 +298,112 @@ export default function GuruDetailPengumpulanTugasPage() {
     })
   }, [rows, search])
 
-  const openDetail = (pengumpulan: Pengumpulan) => {
-    setSelectedPengumpulan(pengumpulan)
-    setNilai(Number(pengumpulan.nilai || 0))
-    setCatatan(pengumpulan.catatan_guru || "")
-  }
-
-  const closeDetail = () => {
-    setSelectedPengumpulan(null)
-    setNilai(0)
-    setCatatan("")
-    setSaving(false)
-  }
-
   const selectedJawaban = selectedPengumpulan
     ? jawabanList.filter(
         (item) => item.id_pengumpulan === selectedPengumpulan.id_pengumpulan
       )
     : []
 
+  const hitungNilaiAkhir = (jawabanData: Jawaban[], essayMap: Record<string, number>) => {
+    if (jawabanData.length === 0) return 0
+
+    const totalSoal = jawabanData.length
+
+    const totalNilai = jawabanData.reduce((total, jawaban) => {
+      if (jawaban.bank_soal?.tipe_soal === "pg") {
+        return total + (jawaban.is_benar ? 100 : 0)
+      }
+
+      return total + Number(essayMap[jawaban.id_jawaban] || 0)
+    }, 0)
+
+    return Math.round(totalNilai / totalSoal)
+  }
+
+  const getJumlahBenarPg = (jawabanData: Jawaban[]) => {
+    return jawabanData.filter(
+      (jawaban) =>
+        jawaban.bank_soal?.tipe_soal === "pg" && jawaban.is_benar === true
+    ).length
+  }
+
+  const getJumlahPg = (jawabanData: Jawaban[]) => {
+    return jawabanData.filter((jawaban) => jawaban.bank_soal?.tipe_soal === "pg")
+      .length
+  }
+
+  const openDetail = (pengumpulan: Pengumpulan) => {
+    const jawabanPengumpulan = jawabanList.filter(
+      (item) => item.id_pengumpulan === pengumpulan.id_pengumpulan
+    )
+
+    const essayMap: Record<string, number> = {}
+
+    jawabanPengumpulan.forEach((jawaban) => {
+      if (jawaban.bank_soal?.tipe_soal === "essay") {
+        essayMap[jawaban.id_jawaban] = Number(jawaban.nilai || 0)
+      }
+    })
+
+    const finalNilai = hitungNilaiAkhir(jawabanPengumpulan, essayMap)
+
+    setSelectedPengumpulan(pengumpulan)
+    setCatatan(pengumpulan.catatan_guru || "")
+    setNilaiPerEssay(essayMap)
+    setNilaiAkhir(finalNilai)
+  }
+
+  const closeDetail = () => {
+    setSelectedPengumpulan(null)
+    setCatatan("")
+    setNilaiAkhir(0)
+    setNilaiPerEssay({})
+    setSaving(false)
+  }
+
+  const handleChangeNilaiEssay = (idJawaban: string, value: number) => {
+    const safeValue = Math.max(0, Math.min(100, Number(value || 0)))
+
+    const newMap = {
+      ...nilaiPerEssay,
+      [idJawaban]: safeValue,
+    }
+
+    setNilaiPerEssay(newMap)
+    setNilaiAkhir(hitungNilaiAkhir(selectedJawaban, newMap))
+  }
+
   const handleSimpanNilai = async () => {
     if (!selectedPengumpulan) return
 
     setSaving(true)
 
+    const finalNilai = hitungNilaiAkhir(selectedJawaban, nilaiPerEssay)
+
+    for (const jawaban of selectedJawaban) {
+      const nilaiSoal =
+        jawaban.bank_soal?.tipe_soal === "pg"
+          ? jawaban.is_benar
+            ? 100
+            : 0
+          : Number(nilaiPerEssay[jawaban.id_jawaban] || 0)
+
+      const { error } = await supabase
+        .from("jawaban_tugas_siswa")
+        .update({
+          nilai: nilaiSoal,
+        })
+        .eq("id_jawaban", jawaban.id_jawaban)
+
+      if (error) {
+        alert(error.message)
+        setSaving(false)
+        return
+      }
+    }
+
     const payload: any = {
-      nilai: Number(nilai),
+      nilai: finalNilai,
       catatan_guru: catatan.trim() || null,
       status: "dinilai",
       dinilai_at: new Date().toISOString(),
@@ -555,7 +637,7 @@ export default function GuruDetailPengumpulanTugasPage() {
 
       {selectedPengumpulan && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 backdrop-blur-sm">
-          <div className="max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+          <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900">
             <div className="mb-5 flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-xl font-bold text-slate-900 dark:text-white">
@@ -574,22 +656,86 @@ export default function GuruDetailPengumpulanTugasPage() {
               </button>
             </div>
 
+            <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950/40">
+              <p className="text-sm text-blue-700 dark:text-blue-300">
+                Rumus: total nilai semua soal dibagi jumlah soal. PG benar = 100,
+                PG salah = 0. Essay dinilai manual per soal.
+              </p>
+
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <div>
+                  <p className="text-xs text-blue-600 dark:text-blue-300">
+                    PG Benar
+                  </p>
+                  <p className="text-xl font-bold text-blue-700 dark:text-blue-300">
+                    {getJumlahBenarPg(selectedJawaban)} /{" "}
+                    {getJumlahPg(selectedJawaban)}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-blue-600 dark:text-blue-300">
+                    Total Soal
+                  </p>
+                  <p className="text-xl font-bold text-blue-700 dark:text-blue-300">
+                    {selectedJawaban.length}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-xs text-blue-600 dark:text-blue-300">
+                    Nilai Akhir
+                  </p>
+                  <p className="text-3xl font-bold text-blue-700 dark:text-blue-300">
+                    {nilaiAkhir}
+                  </p>
+                </div>
+              </div>
+            </div>
+
             <div className="space-y-4">
               {selectedJawaban.map((jawaban, index) => {
                 const opsiBenar = jawaban.bank_soal?.opsi_jawaban?.find(
                   (op) => op.is_benar
                 )
 
+                const isPg = jawaban.bank_soal?.tipe_soal === "pg"
+                const nilaiSoal = isPg
+                  ? jawaban.is_benar
+                    ? 100
+                    : 0
+                  : Number(nilaiPerEssay[jawaban.id_jawaban] || 0)
+
                 return (
                   <div
                     key={jawaban.id_jawaban}
                     className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950"
                   >
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                        No. {index + 1}
+                      </span>
+
+                      <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                        {jawaban.bank_soal?.tipe_soal?.toUpperCase()}
+                      </span>
+
+                      <span
+                        className={
+                          nilaiSoal >= 75
+                            ? "rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700 dark:bg-green-950 dark:text-green-300"
+                            : "rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 dark:bg-red-950 dark:text-red-300"
+                        }
+                      >
+                        Nilai {nilaiSoal}
+                      </span>
+                    </div>
+
                     <p className="font-semibold leading-7 text-slate-900 dark:text-white">
-                      {index + 1}. {jawaban.bank_soal?.pertanyaan}
+                      {jawaban.bank_soal?.pertanyaan}
                     </p>
 
-                    {jawaban.bank_soal?.tipe_soal === "pg" ? (
+                    {isPg ? (
                       <div className="mt-3 space-y-1 text-sm text-slate-700 dark:text-slate-200">
                         <p>
                           Jawaban siswa:{" "}
@@ -619,14 +765,31 @@ export default function GuruDetailPengumpulanTugasPage() {
                         </p>
                       </div>
                     ) : (
-                      <div className="mt-3 rounded-xl bg-slate-50 p-4 text-sm leading-7 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                        {jawaban.jawaban_text || "-"}
+                      <div className="mt-3">
+                        <div className="rounded-xl bg-slate-50 p-4 text-sm leading-7 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                          {jawaban.jawaban_text || "-"}
+                        </div>
+
+                        <div className="mt-3 max-w-xs">
+                          <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                            Nilai Essay Per Soal
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={nilaiSoal}
+                            onChange={(e) =>
+                              handleChangeNilaiEssay(
+                                jawaban.id_jawaban,
+                                Number(e.target.value)
+                              )
+                            }
+                            className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                          />
+                        </div>
                       </div>
                     )}
-
-                    <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                      Nilai soal: {jawaban.nilai || 0}
-                    </p>
                   </div>
                 )
               })}
@@ -638,32 +801,16 @@ export default function GuruDetailPengumpulanTugasPage() {
               )}
             </div>
 
-            <div className="mt-6 grid gap-4 md:grid-cols-[160px_1fr]">
-              <div>
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
-                  Nilai Akhir
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  max={100}
-                  value={nilai}
-                  onChange={(e) => setNilai(Number(e.target.value))}
-                  className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
-                  Catatan Guru
-                </label>
-                <input
-                  value={catatan}
-                  onChange={(e) => setCatatan(e.target.value)}
-                  className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:placeholder:text-slate-500"
-                  placeholder="Catatan opsional..."
-                />
-              </div>
+            <div className="mt-6">
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                Catatan Guru
+              </label>
+              <input
+                value={catatan}
+                onChange={(e) => setCatatan(e.target.value)}
+                className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:placeholder:text-slate-500"
+                placeholder="Catatan opsional..."
+              />
             </div>
 
             <div className="mt-6 flex justify-end gap-2">
