@@ -158,6 +158,11 @@ export const menus: Record<string, MenuGroup[]> = {
           icon: Route,
         },
         {
+  label: "Bank Soal",
+  href: "/kajur/bank-soal",
+  icon: ClipboardList,
+},
+        {
           label: "Validasi Kompetensi",
           href: "/kajur/validasi",
           icon: BadgeCheck,

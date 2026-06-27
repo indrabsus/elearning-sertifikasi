@@ -8,10 +8,10 @@ import {
   Download,
   FileCheck,
   Search,
-  ShieldCheck,
+  ShieldCheck, Printer
 } from "lucide-react"
 
-import { supabase } from "@/lib/supabase"
+import Link from "next/link"
 import { fetchAll } from "@/lib/fetchAll"
 import { protectPage } from "@/lib/protect"
 import DashboardLayout from "@/components/layout/DashboardLayout"
@@ -554,13 +554,13 @@ export default function SiswaSertifikatPage() {
               </div>
 
               {sertifikat ? (
-                <button
-                  onClick={() => printSertifikat(sertifikat)}
-                  className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
-                >
-                  <Download size={16} />
-                  Download Sertifikat
-                </button>
+                <Link
+  href={`/sertifikat/print/${sertifikat.id_sertifikat}`}
+  className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"
+>
+  <Printer size={16} />
+  Print / Download Sertifikat
+</Link>
               ) : status === "menunggu_acc" ? (
                 <div className="mt-5 flex items-center justify-center gap-2 rounded-2xl bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-700 dark:bg-amber-950 dark:text-amber-300">
                   <ShieldCheck size={16} />

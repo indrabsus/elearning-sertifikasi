@@ -9,6 +9,7 @@ import {
   ChevronsUpDown,
   Download,
   FileUp,
+  MessageCircle,
   Pencil,
   Plus,
   Search,
@@ -39,6 +40,7 @@ type SortConfig = {
 }
 
 const ITEMS_PER_PAGE = 10
+const WA_API_URL = process.env.NEXT_PUBLIC_API_WA
 
 export default function AdminGuruPage() {
   const router = useRouter()
@@ -46,6 +48,12 @@ export default function AdminGuruPage() {
   const [loading, setLoading] = useState(true)
   const [guru, setGuru] = useState<Guru[]>([])
   const [search, setSearch] = useState("")
+
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [waMessage, setWaMessage] = useState(
+    "Assalamu'alaikum Bapak/Ibu Guru, berikut informasi dari sekolah."
+  )
+  const [sendingWa, setSendingWa] = useState(false)
 
   const [modalOpen, setModalOpen] = useState(false)
   const [idEdit, setIdEdit] = useState<string | null>(null)
@@ -89,6 +97,22 @@ export default function AdminGuruPage() {
 
     check()
   }, [router])
+
+  const normalizePhone = (phone: string | null) => {
+    if (!phone) return ""
+
+    let cleaned = phone.replace(/\D/g, "")
+
+    if (cleaned.startsWith("0")) {
+      cleaned = "62" + cleaned.slice(1)
+    }
+
+    if (cleaned.startsWith("8")) {
+      cleaned = "62" + cleaned
+    }
+
+    return cleaned
+  }
 
   const resetForm = () => {
     setIdEdit(null)
@@ -170,6 +194,7 @@ export default function AdminGuruPage() {
       return
     }
 
+    setSelectedIds((prev) => prev.filter((item) => item !== id))
     await getData()
   }
 
@@ -294,6 +319,108 @@ export default function AdminGuruPage() {
     currentPage * ITEMS_PER_PAGE
   )
 
+  const selectedGuru = useMemo(() => {
+    return guru.filter((item) => selectedIds.includes(item.id_guru))
+  }, [guru, selectedIds])
+
+  const selectablePageIds = paginatedGuru
+    .filter((item) => normalizePhone(item.no_hp))
+    .map((item) => item.id_guru)
+
+  const isAllPageSelected =
+    selectablePageIds.length > 0 &&
+    selectablePageIds.every((id) => selectedIds.includes(id))
+
+  const toggleSelectOne = (id: string) => {
+    setSelectedIds((prev) => {
+      if (prev.includes(id)) {
+        return prev.filter((item) => item !== id)
+      }
+
+      return [...prev, id]
+    })
+  }
+
+  const toggleSelectPage = () => {
+    if (isAllPageSelected) {
+      setSelectedIds((prev) =>
+        prev.filter((id) => !selectablePageIds.includes(id))
+      )
+      return
+    }
+
+    setSelectedIds((prev) => {
+      const merged = new Set([...prev, ...selectablePageIds])
+      return Array.from(merged)
+    })
+  }
+
+  const handleSendWaMassal = async () => {
+    if (selectedGuru.length === 0) {
+      alert("Pilih guru terlebih dahulu")
+      return
+    }
+
+    if (!waMessage.trim()) {
+      alert("Isi pesan WA terlebih dahulu")
+      return
+    }
+
+    const target = selectedGuru
+      .map((item) => ({
+        ...item,
+        phone: normalizePhone(item.no_hp),
+      }))
+      .filter((item) => item.phone)
+
+    if (target.length === 0) {
+      alert("Guru yang dipilih tidak memiliki nomor HP valid")
+      return
+    }
+
+    if (
+      !confirm(
+        `Kirim WA ke ${target.length} guru terpilih?\n\nPesan:\n${waMessage}`
+      )
+    ) {
+      return
+    }
+
+    setSendingWa(true)
+
+    let success = 0
+    let failed = 0
+
+    for (const item of target) {
+      const pesan = waMessage.replaceAll("{nama}", item.nama_lengkap)
+
+      try {
+        const res = await fetch(`${process.env.NEXT_PUBLIC_API_WA}/notifuser`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            nomor: item.phone,
+            pesan: pesan,
+          }),
+        })
+
+        if (res.ok) {
+          success += 1
+        } else {
+          failed += 1
+        }
+      } catch {
+        failed += 1
+      }
+    }
+
+    setSendingWa(false)
+
+    alert(`Kirim WA selesai.\nBerhasil: ${success}\nGagal: ${failed}`)
+  }
+
   useEffect(() => {
     setCurrentPage(1)
   }, [search])
@@ -307,7 +434,7 @@ export default function AdminGuruPage() {
   }) => (
     <button
       onClick={() => handleSort(sortKey)}
-      className="inline-flex items-center gap-1 font-medium hover:text-blue-600"
+      className="inline-flex items-center gap-1 font-medium hover:text-blue-600 dark:hover:text-blue-400"
     >
       {label}
       <ChevronsUpDown size={14} />
@@ -315,16 +442,19 @@ export default function AdminGuruPage() {
   )
 
   if (loading) {
-  return <PageLoader />
-}
+    return <PageLoader />
+  }
 
   return (
     <DashboardLayout title="Kelola Guru" role="admin">
       <div className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-center">
         <div>
-          <h1 className="text-2xl font-bold">Kelola Guru</h1>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
+            Kelola Guru
+          </h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Tambah, edit, hapus, import CSV, sorting, dan pagination data guru.
+            Tambah, edit, hapus, import CSV, kirim WA masal, sorting, dan
+            pagination data guru.
           </p>
         </div>
 
@@ -340,7 +470,40 @@ export default function AdminGuruPage() {
       <div className="mb-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/50 dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/20">
         <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-center">
           <div>
-            <h2 className="font-semibold">Import Guru dari CSV</h2>
+            <h2 className="font-semibold text-slate-900 dark:text-white">
+              Kirim WA Masal Guru
+            </h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Terpilih {selectedGuru.length} guru. Gunakan {"{nama}"} untuk
+              mengganti nama guru otomatis.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSendWaMassal}
+            disabled={sendingWa || selectedGuru.length === 0}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <MessageCircle size={18} />
+            {sendingWa ? "Mengirim..." : "Kirim WA Terpilih"}
+          </button>
+        </div>
+
+        <textarea
+          value={waMessage}
+          onChange={(e) => setWaMessage(e.target.value)}
+          className="min-h-28 w-full rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+          placeholder="Tulis pesan WA..."
+        />
+      </div>
+
+      <div className="mb-6 rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/50 dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/20">
+        <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-center">
+          <div>
+            <h2 className="font-semibold text-slate-900 dark:text-white">
+              Import Guru dari CSV
+            </h2>
             <p className="text-sm text-slate-500 dark:text-slate-400">
               Format kolom: uid_fp, nama_lengkap, jenkel, no_hp
             </p>
@@ -379,7 +542,9 @@ export default function AdminGuruPage() {
       <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/50 dark:border-slate-800 dark:bg-slate-900 dark:shadow-black/20">
         <div className="mb-5 flex flex-col justify-between gap-3 md:flex-row md:items-center">
           <div>
-            <h2 className="font-semibold">Data Guru</h2>
+            <h2 className="font-semibold text-slate-900 dark:text-white">
+              Data Guru
+            </h2>
             <p className="text-sm text-slate-500 dark:text-slate-400">
               Menampilkan {paginatedGuru.length} dari{" "}
               {filteredAndSortedGuru.length} data
@@ -405,7 +570,14 @@ export default function AdminGuruPage() {
             <table className="w-full border-collapse text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-left text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
-                  <th className="p-4">No</th>
+                  <th className="p-4">
+                    <input
+                      type="checkbox"
+                      checked={isAllPageSelected}
+                      onChange={toggleSelectPage}
+                      className="h-4 w-4 rounded border-slate-300"
+                    />
+                  </th>
                   <th className="p-4">
                     <SortButton label="UID FP" sortKey="uid_fp" />
                   </th>
@@ -423,62 +595,72 @@ export default function AdminGuruPage() {
               </thead>
 
               <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                {paginatedGuru.map((item, index) => (
-                  <tr
-                    key={item.id_guru}
-                    className="bg-white transition hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/70"
-                  >
-                    <td className="p-4 text-slate-500 dark:text-slate-400">
-                      {(currentPage - 1) * ITEMS_PER_PAGE + index + 1}
-                    </td>
+                {paginatedGuru.map((item) => {
+                  const hasPhone = Boolean(normalizePhone(item.no_hp))
 
-                    <td className="p-4">
-                      <span className="rounded-xl bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-950 dark:text-blue-300">
-                        {item.uid_fp || "-"}
-                      </span>
-                    </td>
+                  return (
+                    <tr
+                      key={item.id_guru}
+                      className="bg-white transition hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/70"
+                    >
+                      <td className="p-4">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.includes(item.id_guru)}
+                          disabled={!hasPhone}
+                          onChange={() => toggleSelectOne(item.id_guru)}
+                          className="h-4 w-4 rounded border-slate-300 disabled:opacity-40"
+                        />
+                      </td>
 
-                    <td className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-violet-100 text-violet-600 dark:bg-violet-950 dark:text-violet-300">
-                          <UserCog size={18} />
+                      <td className="p-4">
+                        <span className="rounded-xl bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                          {item.uid_fp || "-"}
+                        </span>
+                      </td>
+
+                      <td className="p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-violet-100 text-violet-600 dark:bg-violet-950 dark:text-violet-300">
+                            <UserCog size={18} />
+                          </div>
+
+                          <p className="font-medium text-slate-900 dark:text-slate-100">
+                            {item.nama_lengkap}
+                          </p>
                         </div>
+                      </td>
 
-                        <p className="font-medium text-slate-900 dark:text-slate-100">
-                          {item.nama_lengkap}
-                        </p>
-                      </div>
-                    </td>
+                      <td className="p-4 text-slate-700 dark:text-slate-300">
+                        {item.jenkel || "-"}
+                      </td>
 
-                    <td className="p-4 text-slate-700 dark:text-slate-300">
-                      {item.jenkel || "-"}
-                    </td>
+                      <td className="p-4 text-slate-700 dark:text-slate-300">
+                        {item.no_hp || "-"}
+                      </td>
 
-                    <td className="p-4 text-slate-700 dark:text-slate-300">
-                      {item.no_hp || "-"}
-                    </td>
+                      <td className="p-4">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => handleEdit(item)}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition hover:bg-yellow-50 hover:text-yellow-600 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-yellow-950 dark:hover:text-yellow-300"
+                            title="Edit"
+                          >
+                            <Pencil size={16} />
+                          </button>
 
-                    <td className="p-4">
-                      <div className="flex justify-end gap-2">
-                        <button
-                          onClick={() => handleEdit(item)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition hover:bg-yellow-50 hover:text-yellow-600 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-yellow-950 dark:hover:text-yellow-300"
-                          title="Edit"
-                        >
-                          <Pencil size={16} />
-                        </button>
-
-                        <button
-                          onClick={() => handleDelete(item.id_guru)}
-                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition hover:bg-red-50 hover:text-red-600 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-red-950 dark:hover:text-red-300"
-                          title="Hapus"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          <button
+                            onClick={() => handleDelete(item.id_guru)}
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition hover:bg-red-50 hover:text-red-600 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-red-950 dark:hover:text-red-300"
+                            title="Hapus"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
 
                 {paginatedGuru.length === 0 && (
                   <tr>
@@ -529,7 +711,7 @@ export default function AdminGuruPage() {
           <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900">
             <div className="mb-5 flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-semibold">
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
                   {idEdit ? "Edit Guru" : "Tambah Guru"}
                 </h2>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -548,7 +730,9 @@ export default function AdminGuruPage() {
             <form onSubmit={handleSubmit}>
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
-                  <label className="text-sm font-medium">UID Fingerprint</label>
+                  <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                    UID Fingerprint
+                  </label>
                   <input
                     value={uidFp}
                     onChange={(e) => setUidFp(e.target.value)}
@@ -558,7 +742,9 @@ export default function AdminGuruPage() {
                 </div>
 
                 <div>
-                  <label className="text-sm font-medium">Nama Lengkap</label>
+                  <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                    Nama Lengkap
+                  </label>
                   <input
                     value={namaLengkap}
                     onChange={(e) => setNamaLengkap(e.target.value)}
@@ -568,7 +754,9 @@ export default function AdminGuruPage() {
                 </div>
 
                 <div>
-                  <label className="text-sm font-medium">Jenis Kelamin</label>
+                  <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                    Jenis Kelamin
+                  </label>
                   <select
                     value={jenkel}
                     onChange={(e) => setJenkel(e.target.value)}
@@ -581,7 +769,9 @@ export default function AdminGuruPage() {
                 </div>
 
                 <div>
-                  <label className="text-sm font-medium">No HP</label>
+                  <label className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                    No HP
+                  </label>
                   <input
                     value={noHp}
                     onChange={(e) => setNoHp(e.target.value)}

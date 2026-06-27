@@ -2,7 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
-import { CheckCircle, Search, ShieldCheck, XCircle } from "lucide-react"
+import Link from "next/link"
+import {
+  CheckCircle,
+  Printer,
+  Search,
+  ShieldCheck,
+  XCircle,
+} from "lucide-react"
 
 import { supabase } from "@/lib/supabase"
 import { fetchAll } from "@/lib/fetchAll"
@@ -56,7 +63,6 @@ export default function KajurSertifikatPage() {
 
   const [loading, setLoading] = useState(true)
   const [profile, setProfile] = useState<Profile | null>(null)
-
   const [pengumpulanList, setPengumpulanList] = useState<
     PengumpulanKompetensi[]
   >([])
@@ -134,32 +140,41 @@ export default function KajurSertifikatPage() {
   const filteredData = useMemo(() => {
     const keyword = search.toLowerCase()
 
-    return pengumpulanList.filter((item) => {
-      return (
-        item.status === "menunggu_acc" ||
-        item.status === "lulus" ||
-        item.status === "tidak_lulus"
-      )
-    }).filter((item) => {
-      return (
-        (item.siswa?.nama_lengkap || "").toLowerCase().includes(keyword) ||
-        (item.siswa?.nisn || "").toLowerCase().includes(keyword) ||
-        (item.siswa?.nis || "").toLowerCase().includes(keyword) ||
-        (item.kompetensi_tugas?.kompetensi?.judul || "")
-          .toLowerCase()
-          .includes(keyword) ||
-        (item.kompetensi_tugas?.judul || "").toLowerCase().includes(keyword)
-      )
-    })
+    return pengumpulanList
+      .filter((item) => {
+        return (
+          item.status === "menunggu_acc" ||
+          item.status === "lulus" ||
+          item.status === "tidak_lulus"
+        )
+      })
+      .filter((item) => {
+        return (
+          (item.siswa?.nama_lengkap || "").toLowerCase().includes(keyword) ||
+          (item.siswa?.nisn || "").toLowerCase().includes(keyword) ||
+          (item.siswa?.nis || "").toLowerCase().includes(keyword) ||
+          (item.kompetensi_tugas?.kompetensi?.judul || "")
+            .toLowerCase()
+            .includes(keyword) ||
+          (item.kompetensi_tugas?.judul || "").toLowerCase().includes(keyword)
+        )
+      })
   }, [pengumpulanList, search])
 
-  const sudahAdaSertifikat = (item: PengumpulanKompetensi) => {
+  const getSertifikat = (item: PengumpulanKompetensi) => {
     const idKompetensi = item.kompetensi_tugas?.kompetensi?.id_kompetensi
-    if (!idKompetensi) return false
+    if (!idKompetensi) return null
 
-    return sertifikatList.some(
-      (s) => s.id_siswa === item.id_siswa && s.id_kompetensi === idKompetensi
+    return (
+      sertifikatList.find(
+        (s) =>
+          s.id_siswa === item.id_siswa && s.id_kompetensi === idKompetensi
+      ) || null
     )
+  }
+
+  const sudahAdaSertifikat = (item: PengumpulanKompetensi) => {
+    return Boolean(getSertifikat(item))
   }
 
   const generateNomor = (kodeJurusan?: string) => {
@@ -207,15 +222,17 @@ export default function KajurSertifikatPage() {
     }
 
     const { error: sertifikatError } = await supabase.from("sertifikat").insert({
-      nomor_sertifikat: nomor,
-      id_siswa: item.id_siswa,
-      id_kompetensi: kompetensi.id_kompetensi,
-      nilai: item.nilai,
-      qr_code: kodeVerifikasi,
-      kode_verifikasi: kodeVerifikasi,
-      diterbitkan_oleh: profile?.id_profile || null,
-      status: "aktif",
-    })
+  nomor_sertifikat: nomor,
+  id_siswa: item.id_siswa,
+  id_kompetensi: kompetensi.id_kompetensi,
+  nilai: item.nilai,
+  qr_code: kodeVerifikasi,
+  kode_verifikasi: kodeVerifikasi,
+  diterbitkan_oleh: profile?.id_profile || null,
+  nama_kajur: profile?.nama_lengkap || "Kepala Jurusan",
+  jabatan_kajur: "Kepala Program Keahlian PPLG",
+  status: "aktif",
+})
 
     if (sertifikatError) {
       alert(sertifikatError.message)
@@ -246,6 +263,48 @@ export default function KajurSertifikatPage() {
     await getData()
   }
 
+  const getStatusBadge = (item: PengumpulanKompetensi) => {
+    const sert = getSertifikat(item)
+
+    if (sert) {
+      return (
+        <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+          Sertifikat Terbit
+        </span>
+      )
+    }
+
+    if (item.status === "lulus") {
+      return (
+        <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700 dark:bg-green-950 dark:text-green-300">
+          Lulus
+        </span>
+      )
+    }
+
+    if (item.status === "menunggu_acc") {
+      return (
+        <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+          Menunggu ACC
+        </span>
+      )
+    }
+
+    if (item.status === "tidak_lulus") {
+      return (
+        <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold text-red-700 dark:bg-red-950 dark:text-red-300">
+          Tidak Lulus
+        </span>
+      )
+    }
+
+    return (
+      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+        {item.status}
+      </span>
+    )
+  }
+
   if (loading) return <PageLoader />
 
   return (
@@ -255,16 +314,20 @@ export default function KajurSertifikatPage() {
       nama={profile?.nama_lengkap}
     >
       <div className="mb-6">
-        <h1 className="text-2xl font-bold">Validasi Sertifikat Kompetensi</h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
+          Validasi Sertifikat Kompetensi
+        </h1>
+        <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
           ACC siswa yang sudah menyelesaikan tugas kompetensi.
         </p>
       </div>
 
       <div className="mb-6 grid gap-4 md:grid-cols-4">
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg dark:border-slate-800 dark:bg-slate-900">
-          <p className="text-sm text-slate-500">Menunggu ACC</p>
-          <h2 className="mt-2 text-3xl font-bold">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Menunggu ACC
+          </p>
+          <h2 className="mt-2 text-3xl font-bold text-slate-900 dark:text-white">
             {
               pengumpulanList.filter((item) => item.status === "menunggu_acc")
                 .length
@@ -273,15 +336,17 @@ export default function KajurSertifikatPage() {
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg dark:border-slate-800 dark:bg-slate-900">
-          <p className="text-sm text-slate-500">Lulus</p>
-          <h2 className="mt-2 text-3xl font-bold">
+          <p className="text-sm text-slate-500 dark:text-slate-400">Lulus</p>
+          <h2 className="mt-2 text-3xl font-bold text-slate-900 dark:text-white">
             {pengumpulanList.filter((item) => item.status === "lulus").length}
           </h2>
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg dark:border-slate-800 dark:bg-slate-900">
-          <p className="text-sm text-slate-500">Tidak Lulus</p>
-          <h2 className="mt-2 text-3xl font-bold">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Tidak Lulus
+          </p>
+          <h2 className="mt-2 text-3xl font-bold text-slate-900 dark:text-white">
             {
               pengumpulanList.filter((item) => item.status === "tidak_lulus")
                 .length
@@ -290,16 +355,22 @@ export default function KajurSertifikatPage() {
         </div>
 
         <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg dark:border-slate-800 dark:bg-slate-900">
-          <p className="text-sm text-slate-500">Sertifikat</p>
-          <h2 className="mt-2 text-3xl font-bold">{sertifikatList.length}</h2>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Sertifikat
+          </p>
+          <h2 className="mt-2 text-3xl font-bold text-slate-900 dark:text-white">
+            {sertifikatList.length}
+          </h2>
         </div>
       </div>
 
       <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-lg dark:border-slate-800 dark:bg-slate-900">
         <div className="mb-5 flex flex-col justify-between gap-3 md:flex-row md:items-center">
           <div>
-            <h2 className="font-semibold">Data Validasi</h2>
-            <p className="text-sm text-slate-500">
+            <h2 className="font-semibold text-slate-900 dark:text-white">
+              Data Validasi
+            </h2>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               Menampilkan {filteredData.length} data
             </p>
           </div>
@@ -312,7 +383,7 @@ export default function KajurSertifikatPage() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-950"
+              className="w-full rounded-2xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
               placeholder="Cari siswa / kompetensi..."
             />
           </div>
@@ -320,9 +391,9 @@ export default function KajurSertifikatPage() {
 
         <div className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-sm">
+            <table className="w-full border-collapse text-sm text-slate-700 dark:text-slate-200">
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50 text-left text-slate-600 dark:border-slate-800 dark:bg-slate-950">
+                <tr className="border-b border-slate-200 bg-slate-50 text-left text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
                   <th className="p-4">No</th>
                   <th className="p-4">Siswa</th>
                   <th className="p-4">Kompetensi</th>
@@ -334,40 +405,42 @@ export default function KajurSertifikatPage() {
               </thead>
 
               <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                {filteredData.map((item, index) => (
-                  <tr
-                    key={item.id_pengumpulan_kompetensi}
-                    className="bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/70"
-                  >
-                    <td className="p-4 text-slate-500">{index + 1}</td>
+                {filteredData.map((item, index) => {
+                  const sert = getSertifikat(item)
 
-                    <td className="p-4">
-                      <p className="font-semibold">
-                        {item.siswa?.nama_lengkap || "-"}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {item.siswa?.nisn || item.siswa?.nis || "-"}
-                      </p>
-                    </td>
+                  return (
+                    <tr
+                      key={item.id_pengumpulan_kompetensi}
+                      className="bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/70"
+                    >
+                      <td className="p-4 text-slate-500 dark:text-slate-400">
+                        {index + 1}
+                      </td>
 
-                    <td className="p-4">
-                      {item.kompetensi_tugas?.kompetensi?.judul || "-"}
-                    </td>
+                      <td className="p-4">
+                        <p className="font-semibold text-slate-900 dark:text-white">
+                          {item.siswa?.nama_lengkap || "-"}
+                        </p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          {item.siswa?.nisn || item.siswa?.nis || "-"}
+                        </p>
+                      </td>
 
-                    <td className="p-4">{item.kompetensi_tugas?.judul || "-"}</td>
+                      <td className="p-4">
+                        {item.kompetensi_tugas?.kompetensi?.judul || "-"}
+                      </td>
 
-                    <td className="p-4 font-semibold">{item.nilai || 0}</td>
+                      <td className="p-4">
+                        {item.kompetensi_tugas?.judul || "-"}
+                      </td>
 
-                    <td className="p-4">
-                      <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                        {item.status}
-                      </span>
-                    </td>
+                      <td className="p-4 font-semibold">{item.nilai || 0}</td>
 
-                    <td className="p-4">
-                      <div className="flex justify-end gap-2">
-                        {item.status === "menunggu_acc" &&
-                          !sudahAdaSertifikat(item) && (
+                      <td className="p-4">{getStatusBadge(item)}</td>
+
+                      <td className="p-4">
+                        <div className="flex flex-wrap justify-end gap-2">
+                          {item.status === "menunggu_acc" && !sert && (
                             <>
                               <button
                                 onClick={() => handleAcc(item)}
@@ -387,20 +460,50 @@ export default function KajurSertifikatPage() {
                             </>
                           )}
 
-                        {sudahAdaSertifikat(item) && (
-                          <span className="inline-flex items-center gap-2 rounded-xl bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-700">
-                            <ShieldCheck size={14} />
-                            Sertifikat Terbit
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          {item.status === "lulus" && !sert && (
+                            <button
+                              onClick={() => handleAcc(item)}
+                              className="inline-flex items-center gap-2 rounded-xl bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700"
+                            >
+                              <CheckCircle size={14} />
+                              Terbitkan Sertifikat
+                            </button>
+                          )}
+
+                          {sert && (
+                            <>
+                              <span className="inline-flex items-center gap-2 rounded-xl bg-blue-100 px-3 py-2 text-xs font-semibold text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                                <ShieldCheck size={14} />
+                                Sertifikat Terbit
+                              </span>
+
+                              <Link
+                                href={`/kajur/sertifikat/print/${sert.id_sertifikat}`}
+                                className="inline-flex items-center gap-2 rounded-xl bg-slate-700 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                              >
+                                <Printer size={14} />
+                                Print
+                              </Link>
+                            </>
+                          )}
+
+                          {item.status === "tidak_lulus" && !sert && (
+                            <span className="text-xs text-slate-500 dark:text-slate-400">
+                              Tidak ada aksi
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
 
                 {filteredData.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="p-8 text-center text-slate-500">
+                    <td
+                      colSpan={7}
+                      className="p-8 text-center text-slate-500 dark:text-slate-400"
+                    >
                       Belum ada data validasi.
                     </td>
                   </tr>
